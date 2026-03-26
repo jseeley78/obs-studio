@@ -131,10 +131,19 @@ struct rtmp_stream {
 	os_event_t *buffer_has_data_event;
 	os_event_t *socket_available_event;
 	os_event_t *send_thread_signaled_exit;
+#ifdef __APPLE__
+	int kqueue_fd;
+#elif !defined(_WIN32)
+	int notify_pipe[2];
+#endif
 };
 
 #ifdef _WIN32
 void *socket_thread_windows(void *data);
+#elif defined(__APPLE__)
+void *socket_thread_macos(void *data);
+#else
+void *socket_thread_posix(void *data);
 #endif
 
 /* Adapted from FFmpeg's libavutil/pixfmt.h

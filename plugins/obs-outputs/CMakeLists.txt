@@ -59,6 +59,8 @@ target_sources(
     rtmp-stream.c
     rtmp-stream.h
     rtmp-windows.c
+    rtmp-macos.c
+    rtmp-posix.c
     utils.h
 )
 
