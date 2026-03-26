@@ -30,6 +30,7 @@
 #define OPT_IP_FAMILY "ip_family"
 #define OPT_NEWSOCKETLOOP_ENABLED "new_socket_loop_enabled"
 #define OPT_LOWLATENCY_ENABLED "low_latency_mode_enabled"
+#define OPT_LIMIT_SNDBUF "limit_sndbuf_enabled"
 #define OPT_METADATA_MULTITRACK "metadata_multitrack"
 
 //#define TEST_FRAMEDROPS
@@ -120,6 +121,7 @@ struct rtmp_stream {
 
 	bool new_socket_loop;
 	bool low_latency_mode;
+	bool limit_sndbuf;
 	bool disable_send_window_optimization;
 	bool socket_thread_active;
 	pthread_t socket_thread;

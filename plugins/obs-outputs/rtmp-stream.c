@@ -648,6 +648,14 @@ static void dbr_set_bitrate(struct rtmp_stream *stream);
 #define socklen_t int
 #endif
 
+/* Cap TCP send buffer to limit hidden kernel-level latency.
+ * Smaller buffer -> send() blocks sooner during congestion
+ * -> OBS packet queue grows faster -> check_to_drop_frames fires
+ * earlier.  64 KB balances latency reduction vs throughput:
+ *   1.5 Mbps -> ~341ms, 6 Mbps -> ~85ms, 10 Mbps -> ~51ms
+ * Note: Linux/macOS may internally double this value. */
+#define SNDBUF_SIZE 65536
+
 static void log_sndbuf_size(struct rtmp_stream *stream)
 {
 	int cur_sendbuf_size;
@@ -658,6 +666,14 @@ static void log_sndbuf_size(struct rtmp_stream *stream)
 	}
 }
 
+static void limit_sndbuf_size(struct rtmp_stream *stream)
+{
+	int sndbuf = SNDBUF_SIZE;
+	if (setsockopt(stream->rtmp.m_sb.sb_socket, SOL_SOCKET, SO_SNDBUF,
+		       (char *)&sndbuf, sizeof(sndbuf)))
+		warn("Failed to set SO_SNDBUF to %d", sndbuf);
+}
+
 static void *send_thread(void *data)
 {
 	struct rtmp_stream *stream = data;
@@ -665,6 +681,11 @@ static void *send_thread(void *data)
 	os_set_thread_name("rtmp-stream: send_thread");
 
 	log_sndbuf_size(stream);
+
+	if (stream->limit_sndbuf) {
+		limit_sndbuf_size(stream);
+		log_sndbuf_size(stream);
+	}
 
 	while (os_sem_wait(stream->send_sem) == 0) {
 		struct encoder_packet packet;
@@ -1407,6 +1428,7 @@ static bool init_connect(struct rtmp_stream *stream)
 
 	stream->new_socket_loop = obs_data_get_bool(settings, OPT_NEWSOCKETLOOP_ENABLED);
 	stream->low_latency_mode = obs_data_get_bool(settings, OPT_LOWLATENCY_ENABLED);
+	stream->limit_sndbuf = obs_data_get_bool(settings, OPT_LIMIT_SNDBUF);
 
 	if (stream->new_socket_loop && !strncmp(stream->path.array, "rtmps://", 8)) {
 		warn("Disabling network optimizations, not compatible with RTMPS");
@@ -1785,6 +1807,7 @@ static void rtmp_stream_defaults(obs_data_t *defaults)
 	obs_data_set_default_string(defaults, OPT_BIND_IP, "default");
 	obs_data_set_default_bool(defaults, OPT_NEWSOCKETLOOP_ENABLED, false);
 	obs_data_set_default_bool(defaults, OPT_LOWLATENCY_ENABLED, false);
+	obs_data_set_default_bool(defaults, OPT_LIMIT_SNDBUF, false);
 }
 
 static obs_properties_t *rtmp_stream_properties(void *unused)
@@ -1820,6 +1843,7 @@ static obs_properties_t *rtmp_stream_properties(void *unused)
 
 	obs_properties_add_bool(props, OPT_NEWSOCKETLOOP_ENABLED, obs_module_text("RTMPStream.NewSocketLoop"));
 	obs_properties_add_bool(props, OPT_LOWLATENCY_ENABLED, obs_module_text("RTMPStream.LowLatencyMode"));
+	obs_properties_add_bool(props, OPT_LIMIT_SNDBUF, obs_module_text("RTMPStream.LimitSendBuffer"));
 
 	return props;
 }

@@ -2598,18 +2598,21 @@ void OBSBasicSettings::LoadAdvancedSettings()
 	ui->disableAudioDucking->setChecked(disableAudioDucking);
 
 	const char *processPriority = config_get_string(App()->GetAppConfig(), "General", "ProcessPriority");
-	bool enableNewSocketLoop = config_get_bool(main->Config(), "Output", "NewSocketLoopEnable");
-	bool enableLowLatencyMode = config_get_bool(main->Config(), "Output", "LowLatencyEnable");
 
 	int idx = ui->processPriority->findData(processPriority);
 	if (idx == -1)
 		idx = ui->processPriority->findData("Normal");
 	ui->processPriority->setCurrentIndex(idx);
+#endif
+
+	bool enableNewSocketLoop = config_get_bool(main->Config(), "Output", "NewSocketLoopEnable");
+	bool enableLowLatencyMode = config_get_bool(main->Config(), "Output", "LowLatencyEnable");
+	bool enableLimitSendBuffer = config_get_bool(main->Config(), "Output", "LimitSendBuffer");
 
 	ui->enableNewSocketLoop->setChecked(enableNewSocketLoop);
 	ui->enableLowLatencyMode->setChecked(enableLowLatencyMode);
 	ui->enableLowLatencyMode->setToolTip(QTStr("Basic.Settings.Advanced.Network.TCPPacing.Tooltip"));
-#endif
+	ui->enableLimitSendBuffer->setChecked(enableLimitSendBuffer);
 #if defined(_WIN32) || defined(__APPLE__) || defined(__linux__)
 	bool browserHWAccel = config_get_bool(App()->GetAppConfig(), "General", "BrowserHWAccel");
 	ui->browserHWAccel->setChecked(browserHWAccel);
@@ -3157,10 +3160,11 @@ void OBSBasicSettings::SaveAdvancedSettings()
 	config_set_string(App()->GetAppConfig(), "General", "ProcessPriority", priority.c_str());
 	if (main->Active())
 		SetProcessPriority(priority.c_str());
+#endif
 
 	SaveCheckBox(ui->enableNewSocketLoop, "Output", "NewSocketLoopEnable");
 	SaveCheckBox(ui->enableLowLatencyMode, "Output", "LowLatencyEnable");
-#endif
+	SaveCheckBox(ui->enableLimitSendBuffer, "Output", "LimitSendBuffer");
 #if defined(_WIN32) || defined(__APPLE__) || defined(__linux__)
 	bool browserHWAccel = ui->browserHWAccel->isChecked();
 	config_set_bool(App()->GetAppConfig(), "General", "BrowserHWAccel", browserHWAccel);
@@ -5586,10 +5590,9 @@ void OBSBasicSettings::UpdateAdvNetworkGroup()
 	ui->dynBitrate->setVisible(enabled);
 	ui->ipFamilyLabel->setVisible(enabled);
 	ui->ipFamily->setVisible(enabled);
-#ifdef _WIN32
 	ui->enableNewSocketLoop->setVisible(enabled);
 	ui->enableLowLatencyMode->setVisible(enabled);
-#endif
+	ui->enableLimitSendBuffer->setVisible(enabled);
 }
 
 void OBSBasicSettings::UpdateMultitrackVideo()
