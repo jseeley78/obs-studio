@@ -80,7 +80,7 @@ static bool handle_socket_eof(struct rtmp_stream *stream, uint64_t last_send_tim
 
 		blog(LOG_ERROR,
 		     "socket_thread_macos: Received EOF, "
-		     "%u ms since last send (buffer: %d / %d)",
+		     "%u ms since last send (buffer: %zu / %zu)",
 		     diff, stream->write_buf_len, stream->write_buf_size);
 	}
 
