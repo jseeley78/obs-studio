@@ -24,6 +24,12 @@
 
 #ifdef _WIN32
 #include <util/windows/win-version.h>
+#elif defined(__APPLE__)
+#include <sys/event.h>
+#include <unistd.h>
+#else
+#include <unistd.h>
+#include <fcntl.h>
 #endif
 
 #ifndef SEC_TO_NSEC
@@ -145,6 +151,12 @@ static void rtmp_stream_destroy(void *data)
 
 	if (stream->write_buf)
 		bfree(stream->write_buf);
+#if !defined(_WIN32) && !defined(__APPLE__)
+	if (stream->notify_pipe[0] >= 0) {
+		close(stream->notify_pipe[0]);
+		close(stream->notify_pipe[1]);
+	}
+#endif
 	bfree(stream);
 }
 
@@ -153,6 +165,12 @@ static void *rtmp_stream_create(obs_data_t *settings, obs_output_t *output)
 	struct rtmp_stream *stream = bzalloc(sizeof(struct rtmp_stream));
 	stream->output = output;
 	pthread_mutex_init_value(&stream->packets_mutex);
+#ifdef __APPLE__
+	stream->kqueue_fd = -1;
+#elif !defined(_WIN32)
+	stream->notify_pipe[0] = -1;
+	stream->notify_pipe[1] = -1;
+#endif
 
 	RTMP_LogSetCallback(log_rtmp);
 	RTMP_LogSetLevel(RTMP_LOGWARNING);
@@ -341,7 +359,6 @@ static void droptest_cap_data_rate(struct rtmp_stream *stream, size_t size)
 }
 #endif
 
-#ifdef _WIN32
 static int socket_queue_data(RTMPSockBuf *sb, const char *data, int len, void *arg)
 {
 	UNUSED_PARAMETER(sb);
@@ -373,9 +390,26 @@ retry_send:
 
 	os_event_signal(stream->buffer_has_data_event);
 
+#ifdef __APPLE__
+	/* Snapshot kqueue fd and tolerate EBADF in case the socket
+	 * thread closed it between our read and the kevent() call. */
+	int kq = os_atomic_load_long((volatile long *)&stream->kqueue_fd);
+	if (kq >= 0) {
+		struct kevent kev;
+		EV_SET(&kev, 1, EVFILT_USER, 0, NOTE_TRIGGER, 0, NULL);
+		kevent(kq, &kev, 1, NULL, 0, NULL);
+	}
+#elif !defined(_WIN32)
+	/* Write a byte to the self-pipe to wake up poll() */
+	if (stream->notify_pipe[1] >= 0) {
+		char c = 1;
+		int r = write(stream->notify_pipe[1], &c, 1);
+		(void)r;
+	}
+#endif
+
 	return len;
 }
-#endif // _WIN32
 
 static int handle_socket_read(struct rtmp_stream *stream)
 {
@@ -614,6 +648,15 @@ static void dbr_set_bitrate(struct rtmp_stream *stream);
 
 #ifdef _WIN32
 #define socklen_t int
+#endif
+
+/* Cap TCP send buffer to limit hidden kernel-level latency.
+ * Smaller buffer -> send() blocks sooner during congestion
+ * -> OBS packet queue grows faster -> check_to_drop_frames fires
+ * earlier.  64 KB balances latency reduction vs throughput:
+ *   1.5 Mbps -> ~341ms, 6 Mbps -> ~85ms, 10 Mbps -> ~51ms
+ * Note: Linux/macOS may internally double this value. */
+#define SNDBUF_SIZE 65536
 
 static void log_sndbuf_size(struct rtmp_stream *stream)
 {
@@ -624,7 +667,13 @@ static void log_sndbuf_size(struct rtmp_stream *stream)
 		info("Socket send buffer is %d bytes", cur_sendbuf_size);
 	}
 }
-#endif
+
+static void limit_sndbuf_size(struct rtmp_stream *stream)
+{
+	int sndbuf = SNDBUF_SIZE;
+	if (setsockopt(stream->rtmp.m_sb.sb_socket, SOL_SOCKET, SO_SNDBUF, (char *)&sndbuf, sizeof(sndbuf)))
+		warn("Failed to set SO_SNDBUF to %d", sndbuf);
+}
 
 static void *send_thread(void *data)
 {
@@ -632,9 +681,12 @@ static void *send_thread(void *data)
 
 	os_set_thread_name("rtmp-stream: send_thread");
 
-#ifdef _WIN32
 	log_sndbuf_size(stream);
-#endif
+
+	if (stream->limit_sndbuf) {
+		limit_sndbuf_size(stream);
+		log_sndbuf_size(stream);
+	}
 
 	while (os_sem_wait(stream->send_sem) == 0) {
 		struct encoder_packet packet;
@@ -703,16 +755,38 @@ static void *send_thread(void *data)
 		send_footers(stream); // Y2023 spec
 	}
 
-#ifdef _WIN32
 	log_sndbuf_size(stream);
-#endif
 
 	if (stream->new_socket_loop) {
 		os_event_signal(stream->send_thread_signaled_exit);
 		os_event_signal(stream->buffer_has_data_event);
+#ifdef __APPLE__
+		/* Wake kqueue so it exits promptly */
+		int kq = os_atomic_load_long((volatile long *)&stream->kqueue_fd);
+		if (kq >= 0) {
+			struct kevent kev;
+			EV_SET(&kev, 1, EVFILT_USER, 0, NOTE_TRIGGER, 0, NULL);
+			kevent(kq, &kev, 1, NULL, 0, NULL);
+		}
+#elif !defined(_WIN32)
+		/* Wake poll() via self-pipe */
+		if (stream->notify_pipe[1] >= 0) {
+			char c = 1;
+			int r = write(stream->notify_pipe[1], &c, 1);
+			(void)r;
+		}
+#endif
 		pthread_join(stream->socket_thread, NULL);
 		stream->socket_thread_active = false;
 		stream->rtmp.m_bCustomSend = false;
+#if !defined(_WIN32) && !defined(__APPLE__)
+		if (stream->notify_pipe[0] >= 0) {
+			close(stream->notify_pipe[0]);
+			close(stream->notify_pipe[1]);
+			stream->notify_pipe[0] = -1;
+			stream->notify_pipe[1] = -1;
+		}
+#endif
 	}
 
 	set_output_error(stream);
@@ -998,7 +1072,7 @@ static int init_send(struct rtmp_stream *stream)
 			stream->rtmp.last_error_code = errno;
 #endif
 			warn("Failed to set non-blocking socket");
-			return OBS_OUTPUT_ERROR;
+			goto fail_socket_loop;
 		}
 
 		os_event_reset(stream->send_thread_signaled_exit);
@@ -1057,23 +1131,44 @@ static int init_send(struct rtmp_stream *stream)
 		stream->write_buf_size = ideal_buffer_size;
 		stream->write_buf = bmalloc(ideal_buffer_size);
 
-#ifndef _WIN32
-		warn("New socket loop not supported on this platform");
-		return OBS_OUTPUT_ERROR;
-#else
+#ifdef _WIN32
 		ret = pthread_create(&stream->socket_thread, NULL, socket_thread_windows, stream);
+#elif defined(__APPLE__)
+		stream->kqueue_fd = -1;
+		ret = pthread_create(&stream->socket_thread, NULL, socket_thread_macos, stream);
+#else
+	if (pipe(stream->notify_pipe) < 0) {
+		warn("Failed to create notify pipe");
+		goto fail_socket_loop;
+	}
+	/* Make both ends non-blocking */
+	if (fcntl(stream->notify_pipe[0], F_SETFL, O_NONBLOCK) < 0 ||
+	    fcntl(stream->notify_pipe[1], F_SETFL, O_NONBLOCK) < 0) {
+		warn("Failed to set notify pipe non-blocking");
+		close(stream->notify_pipe[0]);
+		close(stream->notify_pipe[1]);
+		stream->notify_pipe[0] = -1;
+		stream->notify_pipe[1] = -1;
+		goto fail_socket_loop;
+	}
+	ret = pthread_create(&stream->socket_thread, NULL, socket_thread_posix, stream);
+	if (ret != 0) {
+		close(stream->notify_pipe[0]);
+		close(stream->notify_pipe[1]);
+		stream->notify_pipe[0] = -1;
+		stream->notify_pipe[1] = -1;
+	}
+#endif
 
 		if (ret != 0) {
-			RTMP_Close(&stream->rtmp);
 			warn("Failed to create socket thread");
-			return OBS_OUTPUT_ERROR;
+			goto fail_socket_loop;
 		}
 
 		stream->socket_thread_active = true;
 		stream->rtmp.m_bCustomSend = true;
 		stream->rtmp.m_customSendFunc = socket_queue_data;
 		stream->rtmp.m_customSendParam = stream;
-#endif
 	}
 
 	os_atomic_set_bool(&stream->active, true);
@@ -1087,6 +1182,15 @@ static int init_send(struct rtmp_stream *stream)
 	obs_output_begin_data_capture(stream->output, 0);
 
 	return OBS_OUTPUT_SUCCESS;
+
+fail_socket_loop:
+	/* Stop the send thread that was already created before the
+	 * socket loop setup failed. */
+	os_event_signal(stream->stop_event);
+	os_sem_post(stream->send_sem);
+	pthread_join(stream->send_thread, NULL);
+	RTMP_Close(&stream->rtmp);
+	return OBS_OUTPUT_ERROR;
 }
 
 #ifdef _WIN32
@@ -1336,19 +1440,14 @@ static bool init_connect(struct rtmp_stream *stream)
 		stream->addrlen_hint = len;
 	}
 
-#ifdef _WIN32
 	stream->new_socket_loop = obs_data_get_bool(settings, OPT_NEWSOCKETLOOP_ENABLED);
 	stream->low_latency_mode = obs_data_get_bool(settings, OPT_LOWLATENCY_ENABLED);
+	stream->limit_sndbuf = obs_data_get_bool(settings, OPT_LIMIT_SNDBUF);
 
-	// ugly hack for now, can be removed once new loop is reworked
 	if (stream->new_socket_loop && !strncmp(stream->path.array, "rtmps://", 8)) {
 		warn("Disabling network optimizations, not compatible with RTMPS");
 		stream->new_socket_loop = false;
 	}
-#else
-	stream->new_socket_loop = false;
-	stream->low_latency_mode = false;
-#endif
 
 	obs_data_release(settings);
 	return true;
@@ -1720,10 +1819,9 @@ static void rtmp_stream_defaults(obs_data_t *defaults)
 	obs_data_set_default_int(defaults, OPT_PFRAME_DROP_THRESHOLD, 900);
 	obs_data_set_default_int(defaults, OPT_MAX_SHUTDOWN_TIME_SEC, 30);
 	obs_data_set_default_string(defaults, OPT_BIND_IP, "default");
-#ifdef _WIN32
 	obs_data_set_default_bool(defaults, OPT_NEWSOCKETLOOP_ENABLED, false);
 	obs_data_set_default_bool(defaults, OPT_LOWLATENCY_ENABLED, false);
-#endif
+	obs_data_set_default_bool(defaults, OPT_LIMIT_SNDBUF, false);
 }
 
 static obs_properties_t *rtmp_stream_properties(void *unused)
@@ -1757,10 +1855,9 @@ static obs_properties_t *rtmp_stream_properties(void *unused)
 	}
 	netif_saddr_data_free(&addrs);
 
-#ifdef _WIN32
 	obs_properties_add_bool(props, OPT_NEWSOCKETLOOP_ENABLED, obs_module_text("RTMPStream.NewSocketLoop"));
 	obs_properties_add_bool(props, OPT_LOWLATENCY_ENABLED, obs_module_text("RTMPStream.LowLatencyMode"));
-#endif
+	obs_properties_add_bool(props, OPT_LIMIT_SNDBUF, obs_module_text("RTMPStream.LimitSendBuffer"));
 
 	return props;
 }

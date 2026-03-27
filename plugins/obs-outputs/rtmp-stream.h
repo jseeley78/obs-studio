@@ -30,6 +30,7 @@
 #define OPT_IP_FAMILY "ip_family"
 #define OPT_NEWSOCKETLOOP_ENABLED "new_socket_loop_enabled"
 #define OPT_LOWLATENCY_ENABLED "low_latency_mode_enabled"
+#define OPT_LIMIT_SNDBUF "limit_sndbuf_enabled"
 #define OPT_METADATA_MULTITRACK "metadata_multitrack"
 
 //#define TEST_FRAMEDROPS
@@ -120,6 +121,7 @@ struct rtmp_stream {
 
 	bool new_socket_loop;
 	bool low_latency_mode;
+	bool limit_sndbuf;
 	bool disable_send_window_optimization;
 	bool socket_thread_active;
 	pthread_t socket_thread;
@@ -131,10 +133,19 @@ struct rtmp_stream {
 	os_event_t *buffer_has_data_event;
 	os_event_t *socket_available_event;
 	os_event_t *send_thread_signaled_exit;
+#ifdef __APPLE__
+	int kqueue_fd;
+#elif !defined(_WIN32)
+	int notify_pipe[2];
+#endif
 };
 
 #ifdef _WIN32
 void *socket_thread_windows(void *data);
+#elif defined(__APPLE__)
+void *socket_thread_macos(void *data);
+#else
+void *socket_thread_posix(void *data);
 #endif
 
 /* Adapted from FFmpeg's libavutil/pixfmt.h

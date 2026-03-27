@@ -8608,6 +8608,13 @@
                      </property>
                     </widget>
                    </item>
+                   <item row="6" column="1">
+                    <widget class="QCheckBox" name="enableLimitSendBuffer">
+                     <property name="text">
+                      <string>Basic.Settings.Advanced.Network.EnableLimitSendBuffer</string>
+                     </property>
+                    </widget>
+                   </item>
                    <item row="4" column="0">
                     <spacer name="horizontalSpacer_7">
                      <property name="orientation">
