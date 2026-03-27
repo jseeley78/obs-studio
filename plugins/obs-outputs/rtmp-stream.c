@@ -403,7 +403,8 @@ retry_send:
 	/* Write a byte to the self-pipe to wake up poll() */
 	if (stream->notify_pipe[1] >= 0) {
 		char c = 1;
-		(void)write(stream->notify_pipe[1], &c, 1);
+		int r = write(stream->notify_pipe[1], &c, 1);
+		(void)r;
 	}
 #endif
 
@@ -771,7 +772,8 @@ static void *send_thread(void *data)
 		/* Wake poll() via self-pipe */
 		if (stream->notify_pipe[1] >= 0) {
 			char c = 1;
-			(void)write(stream->notify_pipe[1], &c, 1);
+			int r = write(stream->notify_pipe[1], &c, 1);
+			(void)r;
 		}
 #endif
 		pthread_join(stream->socket_thread, NULL);

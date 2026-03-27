@@ -58,7 +58,7 @@ static bool handle_socket_read(struct rtmp_stream *stream, uint64_t last_send_ti
 				     "socket_thread_macos: "
 				     "Remote closed connection, "
 				     "%u ms since last send "
-				     "(buffer: %d / %d)",
+				     "(buffer: %zu / %zu)",
 				     diff, stream->write_buf_len, stream->write_buf_size);
 			} else {
 				blog(LOG_ERROR, "socket_thread_macos: "
@@ -87,7 +87,7 @@ static bool handle_socket_eof(struct rtmp_stream *stream, uint64_t last_send_tim
 	if (os_event_try(stream->stop_event) != EAGAIN)
 		blog(LOG_ERROR,
 		     "socket_thread_macos: Aborting due "
-		     "to EOF during shutdown, %d bytes lost",
+		     "to EOF during shutdown, %zu bytes lost",
 		     stream->write_buf_len);
 	else
 		blog(LOG_ERROR, "socket_thread_macos: Aborting due to EOF");
@@ -224,7 +224,7 @@ static inline void socket_thread_macos_internal(struct rtmp_stream *stream)
 	struct kevent changes[3];
 	EV_SET(&changes[0], stream->rtmp.m_sb.sb_socket, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, NULL);
 	EV_SET(&changes[1], stream->rtmp.m_sb.sb_socket, EVFILT_WRITE, EV_ADD | EV_CLEAR, 0, 0, NULL);
-	EV_SET(&changes[2], 1, EVFILT_USER, EV_ADD | EV_CLEAR, NOTE_FFNOR, 0, NULL);
+	EV_SET(&changes[2], 1, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, NULL);
 
 	if (kevent(kq, changes, 3, NULL, 0, NULL) < 0) {
 		blog(LOG_ERROR,

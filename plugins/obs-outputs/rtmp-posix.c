@@ -27,7 +27,7 @@ static bool socket_event(struct rtmp_stream *stream, bool *can_write, uint64_t l
 			blog(LOG_ERROR,
 			     "socket_thread_posix: Received "
 			     "POLLHUP/POLLERR, %u ms since last send "
-			     "(buffer: %d / %d)",
+			     "(buffer: %zu / %zu)",
 			     diff, stream->write_buf_len, stream->write_buf_size);
 		}
 
@@ -35,7 +35,7 @@ static bool socket_event(struct rtmp_stream *stream, bool *can_write, uint64_t l
 			blog(LOG_ERROR,
 			     "socket_thread_posix: Aborting due "
 			     "to POLLHUP/POLLERR during shutdown, "
-			     "%d bytes lost",
+			     "%zu bytes lost",
 			     stream->write_buf_len);
 		else
 			blog(LOG_ERROR, "socket_thread_posix: Aborting due "
