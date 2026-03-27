@@ -5590,9 +5590,12 @@ void OBSBasicSettings::UpdateAdvNetworkGroup()
 	ui->dynBitrate->setVisible(enabled);
 	ui->ipFamilyLabel->setVisible(enabled);
 	ui->ipFamily->setVisible(enabled);
-	ui->enableNewSocketLoop->setVisible(enabled);
-	ui->enableLowLatencyMode->setVisible(enabled);
-	ui->enableLimitSendBuffer->setVisible(enabled);
+	if (ui->enableNewSocketLoop)
+		ui->enableNewSocketLoop->setVisible(enabled);
+	if (ui->enableLowLatencyMode)
+		ui->enableLowLatencyMode->setVisible(enabled);
+	if (ui->enableLimitSendBuffer)
+		ui->enableLimitSendBuffer->setVisible(enabled);
 }
 
 void OBSBasicSettings::UpdateMultitrackVideo()
