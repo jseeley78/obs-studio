@@ -359,8 +359,7 @@ static void droptest_cap_data_rate(struct rtmp_stream *stream, size_t size)
 }
 #endif
 
-static int socket_queue_data(RTMPSockBuf *sb, const char *data, int len,
-			     void *arg)
+static int socket_queue_data(RTMPSockBuf *sb, const char *data, int len, void *arg)
 {
 	UNUSED_PARAMETER(sb);
 
@@ -671,8 +670,7 @@ static void log_sndbuf_size(struct rtmp_stream *stream)
 static void limit_sndbuf_size(struct rtmp_stream *stream)
 {
 	int sndbuf = SNDBUF_SIZE;
-	if (setsockopt(stream->rtmp.m_sb.sb_socket, SOL_SOCKET, SO_SNDBUF,
-		       (char *)&sndbuf, sizeof(sndbuf)))
+	if (setsockopt(stream->rtmp.m_sb.sb_socket, SOL_SOCKET, SO_SNDBUF, (char *)&sndbuf, sizeof(sndbuf)))
 		warn("Failed to set SO_SNDBUF to %d", sndbuf);
 }
 
@@ -763,12 +761,10 @@ static void *send_thread(void *data)
 		os_event_signal(stream->buffer_has_data_event);
 #ifdef __APPLE__
 		/* Wake kqueue so it exits promptly */
-		int kq = os_atomic_load_long(
-			(volatile long *)&stream->kqueue_fd);
+		int kq = os_atomic_load_long((volatile long *)&stream->kqueue_fd);
 		if (kq >= 0) {
 			struct kevent kev;
-			EV_SET(&kev, 1, EVFILT_USER, 0, NOTE_TRIGGER, 0,
-			       NULL);
+			EV_SET(&kev, 1, EVFILT_USER, 0, NOTE_TRIGGER, 0, NULL);
 			kevent(kq, &kev, 1, NULL, 0, NULL);
 		}
 #elif !defined(_WIN32)
@@ -1134,35 +1130,32 @@ static int init_send(struct rtmp_stream *stream)
 		stream->write_buf = bmalloc(ideal_buffer_size);
 
 #ifdef _WIN32
-		ret = pthread_create(&stream->socket_thread, NULL,
-				     socket_thread_windows, stream);
+		ret = pthread_create(&stream->socket_thread, NULL, socket_thread_windows, stream);
 #elif defined(__APPLE__)
 		stream->kqueue_fd = -1;
-		ret = pthread_create(&stream->socket_thread, NULL,
-				     socket_thread_macos, stream);
+		ret = pthread_create(&stream->socket_thread, NULL, socket_thread_macos, stream);
 #else
-		if (pipe(stream->notify_pipe) < 0) {
-			warn("Failed to create notify pipe");
-			goto fail_socket_loop;
-		}
-		/* Make both ends non-blocking */
-		if (fcntl(stream->notify_pipe[0], F_SETFL, O_NONBLOCK) < 0 ||
-		    fcntl(stream->notify_pipe[1], F_SETFL, O_NONBLOCK) < 0) {
-			warn("Failed to set notify pipe non-blocking");
-			close(stream->notify_pipe[0]);
-			close(stream->notify_pipe[1]);
-			stream->notify_pipe[0] = -1;
-			stream->notify_pipe[1] = -1;
-			goto fail_socket_loop;
-		}
-		ret = pthread_create(&stream->socket_thread, NULL,
-				     socket_thread_posix, stream);
-		if (ret != 0) {
-			close(stream->notify_pipe[0]);
-			close(stream->notify_pipe[1]);
-			stream->notify_pipe[0] = -1;
-			stream->notify_pipe[1] = -1;
-		}
+	if (pipe(stream->notify_pipe) < 0) {
+		warn("Failed to create notify pipe");
+		goto fail_socket_loop;
+	}
+	/* Make both ends non-blocking */
+	if (fcntl(stream->notify_pipe[0], F_SETFL, O_NONBLOCK) < 0 ||
+	    fcntl(stream->notify_pipe[1], F_SETFL, O_NONBLOCK) < 0) {
+		warn("Failed to set notify pipe non-blocking");
+		close(stream->notify_pipe[0]);
+		close(stream->notify_pipe[1]);
+		stream->notify_pipe[0] = -1;
+		stream->notify_pipe[1] = -1;
+		goto fail_socket_loop;
+	}
+	ret = pthread_create(&stream->socket_thread, NULL, socket_thread_posix, stream);
+	if (ret != 0) {
+		close(stream->notify_pipe[0]);
+		close(stream->notify_pipe[1]);
+		stream->notify_pipe[0] = -1;
+		stream->notify_pipe[1] = -1;
+	}
 #endif
 
 		if (ret != 0) {

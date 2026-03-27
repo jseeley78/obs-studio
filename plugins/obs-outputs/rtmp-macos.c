@@ -33,14 +33,12 @@ static void fatal_sock_shutdown(struct rtmp_stream *stream)
 	os_event_signal(stream->buffer_space_available_event);
 }
 
-static bool handle_socket_read(struct rtmp_stream *stream,
-			       uint64_t last_send_time)
+static bool handle_socket_read(struct rtmp_stream *stream, uint64_t last_send_time)
 {
 	char discard[16384];
 
 	for (;;) {
-		int ret = recv(stream->rtmp.m_sb.sb_socket, discard,
-			       sizeof(discard), 0);
+		int ret = recv(stream->rtmp.m_sb.sb_socket, discard, sizeof(discard), 0);
 		if (ret == -1) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK)
 				break;
@@ -55,19 +53,16 @@ static bool handle_socket_read(struct rtmp_stream *stream,
 			return false;
 		} else if (ret == 0) {
 			if (last_send_time) {
-				uint32_t diff = (os_gettime_ns() / 1000000) -
-						last_send_time;
+				uint32_t diff = (os_gettime_ns() / 1000000) - last_send_time;
 				blog(LOG_ERROR,
 				     "socket_thread_macos: "
 				     "Remote closed connection, "
 				     "%u ms since last send "
 				     "(buffer: %d / %d)",
-				     diff, stream->write_buf_len,
-				     stream->write_buf_size);
+				     diff, stream->write_buf_len, stream->write_buf_size);
 			} else {
-				blog(LOG_ERROR,
-				     "socket_thread_macos: "
-				     "Remote closed connection");
+				blog(LOG_ERROR, "socket_thread_macos: "
+						"Remote closed connection");
 			}
 			stream->rtmp.last_error_code = 0;
 			fatal_sock_shutdown(stream);
@@ -78,8 +73,7 @@ static bool handle_socket_read(struct rtmp_stream *stream,
 	return true;
 }
 
-static bool handle_socket_eof(struct rtmp_stream *stream,
-			      uint64_t last_send_time)
+static bool handle_socket_eof(struct rtmp_stream *stream, uint64_t last_send_time)
 {
 	if (last_send_time) {
 		uint32_t diff = (os_gettime_ns() / 1000000) - last_send_time;
@@ -109,8 +103,7 @@ static inline size_t min_size(size_t a, size_t b)
 	return a < b ? a : b;
 }
 
-static enum data_ret write_data(struct rtmp_stream *stream, bool *can_write,
-				uint64_t *last_send_time,
+static enum data_ret write_data(struct rtmp_stream *stream, bool *can_write, uint64_t *last_send_time,
 				size_t latency_packet_size, int delay_time)
 {
 	bool exit_loop = false;
@@ -124,22 +117,16 @@ static enum data_ret write_data(struct rtmp_stream *stream, bool *can_write,
 
 	int ret;
 	if (stream->low_latency_mode) {
-		size_t send_len =
-			min_size(latency_packet_size, stream->write_buf_len);
+		size_t send_len = min_size(latency_packet_size, stream->write_buf_len);
 
-		ret = RTMPSockBuf_Send(&stream->rtmp.m_sb,
-				       (const char *)stream->write_buf,
-				       (int)send_len);
+		ret = RTMPSockBuf_Send(&stream->rtmp.m_sb, (const char *)stream->write_buf, (int)send_len);
 	} else {
-		ret = RTMPSockBuf_Send(&stream->rtmp.m_sb,
-				       (const char *)stream->write_buf,
-				       (int)stream->write_buf_len);
+		ret = RTMPSockBuf_Send(&stream->rtmp.m_sb, (const char *)stream->write_buf, (int)stream->write_buf_len);
 	}
 
 	if (ret > 0) {
 		if (stream->write_buf_len - ret)
-			memmove(stream->write_buf, stream->write_buf + ret,
-				stream->write_buf_len - ret);
+			memmove(stream->write_buf, stream->write_buf + ret, stream->write_buf_len - ret);
 		stream->write_buf_len -= ret;
 
 		*last_send_time = os_gettime_ns() / 1000000;
@@ -160,9 +147,8 @@ static enum data_ret write_data(struct rtmp_stream *stream, bool *can_write,
 			     ret, errno);
 			stream->rtmp.last_error_code = errno;
 		} else if (ret == 0) {
-			blog(LOG_ERROR,
-			     "socket_thread_macos: "
-			     "Socket error, send() returned 0");
+			blog(LOG_ERROR, "socket_thread_macos: "
+					"Socket error, send() returned 0");
 			stream->rtmp.last_error_code = 0;
 		}
 
@@ -195,8 +181,7 @@ static inline void socket_thread_macos_internal(struct rtmp_stream *stream)
 
 	if (stream->low_latency_mode) {
 		delay_time = 1000 / LATENCY_FACTOR;
-		latency_packet_size =
-			stream->write_buf_size / (LATENCY_FACTOR - 2);
+		latency_packet_size = stream->write_buf_size / (LATENCY_FACTOR - 2);
 	} else {
 		latency_packet_size = stream->write_buf_size;
 		delay_time = 0;
@@ -208,8 +193,7 @@ static inline void socket_thread_macos_internal(struct rtmp_stream *stream)
 	 * the kernel buffer during congestion, which would otherwise
 	 * translate directly into stream delay. */
 	int notsent_lowat = NOTSENT_LOWAT_VALUE;
-	if (setsockopt(stream->rtmp.m_sb.sb_socket, IPPROTO_TCP,
-		       TCP_NOTSENT_LOWAT, &notsent_lowat,
+	if (setsockopt(stream->rtmp.m_sb.sb_socket, IPPROTO_TCP, TCP_NOTSENT_LOWAT, &notsent_lowat,
 		       sizeof(notsent_lowat)) < 0) {
 		blog(LOG_WARNING,
 		     "socket_thread_macos: Failed to set "
@@ -238,12 +222,9 @@ static inline void socket_thread_macos_internal(struct rtmp_stream *stream)
 	 *   [1] EVFILT_WRITE - socket writable (respects TCP_NOTSENT_LOWAT)
 	 *   [2] EVFILT_USER  - wakeup from buffer producer */
 	struct kevent changes[3];
-	EV_SET(&changes[0], stream->rtmp.m_sb.sb_socket, EVFILT_READ,
-	       EV_ADD | EV_CLEAR, 0, 0, NULL);
-	EV_SET(&changes[1], stream->rtmp.m_sb.sb_socket, EVFILT_WRITE,
-	       EV_ADD | EV_CLEAR, 0, 0, NULL);
-	EV_SET(&changes[2], 1, EVFILT_USER, EV_ADD | EV_CLEAR, NOTE_FFNOR, 0,
-	       NULL);
+	EV_SET(&changes[0], stream->rtmp.m_sb.sb_socket, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, NULL);
+	EV_SET(&changes[1], stream->rtmp.m_sb.sb_socket, EVFILT_WRITE, EV_ADD | EV_CLEAR, 0, 0, NULL);
+	EV_SET(&changes[2], 1, EVFILT_USER, EV_ADD | EV_CLEAR, NOTE_FFNOR, 0, NULL);
 
 	if (kevent(kq, changes, 3, NULL, 0, NULL) < 0) {
 		blog(LOG_ERROR,
@@ -262,8 +243,7 @@ static inline void socket_thread_macos_internal(struct rtmp_stream *stream)
 	struct timespec timeout = {.tv_sec = 0, .tv_nsec = 200000000}; /* 200ms */
 
 	for (;;) {
-		if (os_event_try(stream->send_thread_signaled_exit) !=
-		    EAGAIN) {
+		if (os_event_try(stream->send_thread_signaled_exit) != EAGAIN) {
 			pthread_mutex_lock(&stream->write_buf_mutex);
 			if (stream->write_buf_len == 0) {
 				pthread_mutex_unlock(&stream->write_buf_mutex);
@@ -292,14 +272,12 @@ static inline void socket_thread_macos_internal(struct rtmp_stream *stream)
 
 			if (ev->filter == EVFILT_READ) {
 				if (ev->flags & EV_EOF) {
-					if (!handle_socket_eof(stream,
-							       last_send_time)) {
+					if (!handle_socket_eof(stream, last_send_time)) {
 						close_kqueue(stream, kq);
 						return;
 					}
 				} else {
-					if (!handle_socket_read(
-						    stream, last_send_time)) {
+					if (!handle_socket_read(stream, last_send_time)) {
 						close_kqueue(stream, kq);
 						return;
 					}
@@ -326,9 +304,8 @@ static inline void socket_thread_macos_internal(struct rtmp_stream *stream)
 
 		if (can_write) {
 			for (;;) {
-				enum data_ret ret = write_data(
-					stream, &can_write, &last_send_time,
-					latency_packet_size, delay_time);
+				enum data_ret ret = write_data(stream, &can_write, &last_send_time, latency_packet_size,
+							       delay_time);
 
 				switch (ret) {
 				case RET_BREAK:
