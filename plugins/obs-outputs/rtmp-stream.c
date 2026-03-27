@@ -392,11 +392,13 @@ retry_send:
 	os_event_signal(stream->buffer_has_data_event);
 
 #ifdef __APPLE__
-	/* Trigger EVFILT_USER to wake up the kqueue loop */
-	if (stream->kqueue_fd >= 0) {
+	/* Snapshot kqueue fd and tolerate EBADF in case the socket
+	 * thread closed it between our read and the kevent() call. */
+	int kq = os_atomic_load_long((volatile long *)&stream->kqueue_fd);
+	if (kq >= 0) {
 		struct kevent kev;
 		EV_SET(&kev, 1, EVFILT_USER, 0, NOTE_TRIGGER, 0, NULL);
-		kevent(stream->kqueue_fd, &kev, 1, NULL, 0, NULL);
+		kevent(kq, &kev, 1, NULL, 0, NULL);
 	}
 #elif !defined(_WIN32)
 	/* Write a byte to the self-pipe to wake up poll() */
@@ -761,11 +763,13 @@ static void *send_thread(void *data)
 		os_event_signal(stream->buffer_has_data_event);
 #ifdef __APPLE__
 		/* Wake kqueue so it exits promptly */
-		if (stream->kqueue_fd >= 0) {
+		int kq = os_atomic_load_long(
+			(volatile long *)&stream->kqueue_fd);
+		if (kq >= 0) {
 			struct kevent kev;
 			EV_SET(&kev, 1, EVFILT_USER, 0, NOTE_TRIGGER, 0,
 			       NULL);
-			kevent(stream->kqueue_fd, &kev, 1, NULL, 0, NULL);
+			kevent(kq, &kev, 1, NULL, 0, NULL);
 		}
 #elif !defined(_WIN32)
 		/* Wake poll() via self-pipe */
@@ -1070,7 +1074,7 @@ static int init_send(struct rtmp_stream *stream)
 			stream->rtmp.last_error_code = errno;
 #endif
 			warn("Failed to set non-blocking socket");
-			return OBS_OUTPUT_ERROR;
+			goto fail_socket_loop;
 		}
 
 		os_event_reset(stream->send_thread_signaled_exit);
@@ -1139,11 +1143,18 @@ static int init_send(struct rtmp_stream *stream)
 #else
 		if (pipe(stream->notify_pipe) < 0) {
 			warn("Failed to create notify pipe");
-			return OBS_OUTPUT_ERROR;
+			goto fail_socket_loop;
 		}
 		/* Make both ends non-blocking */
-		fcntl(stream->notify_pipe[0], F_SETFL, O_NONBLOCK);
-		fcntl(stream->notify_pipe[1], F_SETFL, O_NONBLOCK);
+		if (fcntl(stream->notify_pipe[0], F_SETFL, O_NONBLOCK) < 0 ||
+		    fcntl(stream->notify_pipe[1], F_SETFL, O_NONBLOCK) < 0) {
+			warn("Failed to set notify pipe non-blocking");
+			close(stream->notify_pipe[0]);
+			close(stream->notify_pipe[1]);
+			stream->notify_pipe[0] = -1;
+			stream->notify_pipe[1] = -1;
+			goto fail_socket_loop;
+		}
 		ret = pthread_create(&stream->socket_thread, NULL,
 				     socket_thread_posix, stream);
 		if (ret != 0) {
@@ -1155,9 +1166,8 @@ static int init_send(struct rtmp_stream *stream)
 #endif
 
 		if (ret != 0) {
-			RTMP_Close(&stream->rtmp);
 			warn("Failed to create socket thread");
-			return OBS_OUTPUT_ERROR;
+			goto fail_socket_loop;
 		}
 
 		stream->socket_thread_active = true;
@@ -1177,6 +1187,15 @@ static int init_send(struct rtmp_stream *stream)
 	obs_output_begin_data_capture(stream->output, 0);
 
 	return OBS_OUTPUT_SUCCESS;
+
+fail_socket_loop:
+	/* Stop the send thread that was already created before the
+	 * socket loop setup failed. */
+	os_event_signal(stream->stop_event);
+	os_sem_post(stream->send_sem);
+	pthread_join(stream->send_thread, NULL);
+	RTMP_Close(&stream->rtmp);
+	return OBS_OUTPUT_ERROR;
 }
 
 #ifdef _WIN32

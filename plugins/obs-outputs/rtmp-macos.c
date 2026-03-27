@@ -9,6 +9,16 @@
 #include <pthread.h>
 #include <fcntl.h>
 
+/* Invalidate kqueue_fd before closing to avoid a race where the
+ * producer snapshots a valid fd, the socket thread closes it, the OS
+ * reuses the fd number, and the producer issues kevent() on the wrong
+ * descriptor.  Uses atomic exchange so the producer sees -1 promptly. */
+static inline void close_kqueue(struct rtmp_stream *stream, int kq)
+{
+	os_atomic_set_long((volatile long *)&stream->kqueue_fd, -1);
+	close(kq);
+}
+
 /* TCP_NOTSENT_LOWAT: only report writable when unsent data in the
  * kernel TCP stack drops below this threshold.  This gives us direct
  * visibility into kernel-side buffering caused by congestion, letting
@@ -240,13 +250,13 @@ static inline void socket_thread_macos_internal(struct rtmp_stream *stream)
 		     "socket_thread_macos: Failed to register "
 		     "kqueue events, errno %d",
 		     errno);
-		close(kq);
+		close_kqueue(stream, kq);
 		fatal_sock_shutdown(stream);
 		return;
 	}
 
 	/* Store kqueue fd so the producer can trigger EVFILT_USER */
-	stream->kqueue_fd = kq;
+	os_atomic_set_long((volatile long *)&stream->kqueue_fd, kq);
 
 	struct kevent events[3];
 	struct timespec timeout = {.tv_sec = 0, .tv_nsec = 200000000}; /* 200ms */
@@ -272,8 +282,7 @@ static inline void socket_thread_macos_internal(struct rtmp_stream *stream)
 			     "socket_thread_macos: Aborting due "
 			     "to kevent() failure, errno %d",
 			     errno);
-			close(kq);
-			stream->kqueue_fd = -1;
+			close_kqueue(stream, kq);
 			fatal_sock_shutdown(stream);
 			return;
 		}
@@ -285,15 +294,13 @@ static inline void socket_thread_macos_internal(struct rtmp_stream *stream)
 				if (ev->flags & EV_EOF) {
 					if (!handle_socket_eof(stream,
 							       last_send_time)) {
-						close(kq);
-						stream->kqueue_fd = -1;
+						close_kqueue(stream, kq);
 						return;
 					}
 				} else {
 					if (!handle_socket_read(
 						    stream, last_send_time)) {
-						close(kq);
-						stream->kqueue_fd = -1;
+						close_kqueue(stream, kq);
 						return;
 					}
 				}
@@ -327,8 +334,7 @@ static inline void socket_thread_macos_internal(struct rtmp_stream *stream)
 				case RET_BREAK:
 					goto exit_write_loop;
 				case RET_FATAL:
-					close(kq);
-					stream->kqueue_fd = -1;
+					close_kqueue(stream, kq);
 					return;
 				case RET_CONTINUE:;
 				}
@@ -337,8 +343,7 @@ static inline void socket_thread_macos_internal(struct rtmp_stream *stream)
 	exit_write_loop:;
 	}
 
-	close(kq);
-	stream->kqueue_fd = -1;
+	close_kqueue(stream, kq);
 
 	blog(LOG_INFO, "socket_thread_macos: Normal exit");
 }
