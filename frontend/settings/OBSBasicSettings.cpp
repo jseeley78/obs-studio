@@ -550,6 +550,7 @@ OBSBasicSettings::OBSBasicSettings(QWidget *parent)
 	HookWidget(ui->ipFamily,             COMBO_CHANGED,  ADV_CHANGED);
 	HookWidget(ui->enableNewSocketLoop,  CHECK_CHANGED,  ADV_CHANGED);
 	HookWidget(ui->enableLowLatencyMode, CHECK_CHANGED,  ADV_CHANGED);
+	HookWidget(ui->enableLimitSendBuffer, CHECK_CHANGED, ADV_CHANGED);
 	HookWidget(ui->hotkeyFocusType,      COMBO_CHANGED,  ADV_CHANGED);
 	HookWidget(ui->autoRemux,            CHECK_CHANGED,  ADV_CHANGED);
 	HookWidget(ui->dynBitrate,           CHECK_CHANGED,  ADV_CHANGED);
@@ -629,8 +630,6 @@ OBSBasicSettings::OBSBasicSettings(QWidget *parent)
 #endif
 	delete ui->processPriorityLabel;
 	delete ui->processPriority;
-	delete ui->enableNewSocketLoop;
-	delete ui->enableLowLatencyMode;
 	delete ui->hideOBSFromCapture;
 #if !defined(__APPLE__) && !defined(__linux__)
 	delete ui->browserHWAccel;
@@ -640,8 +639,6 @@ OBSBasicSettings::OBSBasicSettings(QWidget *parent)
 
 	ui->processPriorityLabel = nullptr;
 	ui->processPriority = nullptr;
-	ui->enableNewSocketLoop = nullptr;
-	ui->enableLowLatencyMode = nullptr;
 	ui->hideOBSFromCapture = nullptr;
 #if !defined(__APPLE__) && !defined(__linux__)
 	ui->browserHWAccel = nullptr;
@@ -5590,12 +5587,9 @@ void OBSBasicSettings::UpdateAdvNetworkGroup()
 	ui->dynBitrate->setVisible(enabled);
 	ui->ipFamilyLabel->setVisible(enabled);
 	ui->ipFamily->setVisible(enabled);
-	if (ui->enableNewSocketLoop)
-		ui->enableNewSocketLoop->setVisible(enabled);
-	if (ui->enableLowLatencyMode)
-		ui->enableLowLatencyMode->setVisible(enabled);
-	if (ui->enableLimitSendBuffer)
-		ui->enableLimitSendBuffer->setVisible(enabled);
+	ui->enableNewSocketLoop->setVisible(enabled);
+	ui->enableLowLatencyMode->setVisible(enabled);
+	ui->enableLimitSendBuffer->setVisible(enabled);
 }
 
 void OBSBasicSettings::UpdateMultitrackVideo()
