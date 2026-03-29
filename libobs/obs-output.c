@@ -2313,16 +2313,22 @@ static void default_encoded_callback(void *param, struct encoder_packet *packet,
 	struct obs_output *output = param;
 
 	if (data_active(output)) {
+		struct encoder_packet out;
+
 		packet->track_idx = get_encoder_index(output, packet);
 
-		output->info.encoded_packet(output->context.data, packet);
+		if (output->active_delay_ns)
+			out = *packet;
+		else
+			obs_encoder_packet_create_instance(&out, packet);
+
+		output->info.encoded_packet(output->context.data, &out);
 
 		if (packet->type == OBS_ENCODER_VIDEO)
 			output->total_frames++;
-	}
-
-	if (output->active_delay_ns)
+	} else if (output->active_delay_ns) {
 		obs_encoder_packet_release(packet);
+	}
 }
 
 static void default_raw_video_callback(void *param, struct video_data *frame)
@@ -2496,7 +2502,9 @@ static void hook_data_capture(struct obs_output *output)
 		reset_packet_data(output);
 		pthread_mutex_unlock(&output->interleaved_mutex);
 
-		encoded_callback = (has_video && has_audio) ? interleave_packets : default_encoded_callback;
+		encoded_callback = (has_video && has_audio && !(output->info.flags & OBS_OUTPUT_NO_INTERLEAVE))
+					   ? interleave_packets
+					   : default_encoded_callback;
 
 		if (output->delay_sec) {
 			output->active_delay_ns = (uint64_t)output->delay_sec * 1000000000ULL;
@@ -2845,7 +2853,9 @@ static void *end_data_capture_thread(void *data)
 		if (output->active_delay_ns)
 			encoded_callback = process_delay;
 		else
-			encoded_callback = (has_video && has_audio) ? interleave_packets : default_encoded_callback;
+			encoded_callback = (has_video && has_audio && !(output->info.flags & OBS_OUTPUT_NO_INTERLEAVE))
+						   ? interleave_packets
+						   : default_encoded_callback;
 
 		if (has_video)
 			stop_video_encoders(output, encoded_callback);

@@ -1795,7 +1795,8 @@ static int rtmp_stream_connect_time(void *data)
 
 struct obs_output_info rtmp_output_info = {
 	.id = "rtmp_output",
-	.flags = OBS_OUTPUT_AV | OBS_OUTPUT_ENCODED | OBS_OUTPUT_SERVICE | OBS_OUTPUT_MULTI_TRACK_AV,
+	.flags = OBS_OUTPUT_AV | OBS_OUTPUT_ENCODED | OBS_OUTPUT_SERVICE | OBS_OUTPUT_MULTI_TRACK_AV |
+		 OBS_OUTPUT_NO_INTERLEAVE,
 #ifdef NO_CRYPTO
 	.protocols = "RTMP",
 #else
